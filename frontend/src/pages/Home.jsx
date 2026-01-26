@@ -1,6 +1,6 @@
 import React from 'react';
 import { useNavigate } from 'react-router-dom';
-import { QrCode, MessageSquare, Mic, LogOut, Wallet } from 'lucide-react';
+import { QrCode, MessageSquare, Mic, LogOut, Wallet, UserPlus } from 'lucide-react';
 
 const Home = () => {
     const navigate = useNavigate();
@@ -68,6 +68,12 @@ const Home = () => {
                     icon={MessageSquare}
                     onClick={() => { }} // Opens Chatbot
                     color="bg-purple-500"
+                />
+                <MenuCard
+                    title="Add Beneficiary"
+                    icon={UserPlus}
+                    onClick={() => navigate('/add-beneficiary')}
+                    color="bg-pink-500"
                 />
             </div>
 

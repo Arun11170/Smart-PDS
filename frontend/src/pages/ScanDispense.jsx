@@ -1,9 +1,12 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { Camera, CheckCircle, XCircle, RefreshCw, ShoppingBag, User, FileText, AlertTriangle, UserX } from 'lucide-react';
+import { Camera, CheckCircle, XCircle, RefreshCw, ShoppingBag, User, FileText, AlertTriangle, UserX, Plus } from 'lucide-react';
 import { motion } from 'framer-motion';
+
+import { useLocation } from 'react-router-dom';
 
 const ScanDispense = () => {
     const videoRef = useRef(null);
+    const location = useLocation();
     const [step, setStep] = useState(1); // 1: Scan QR, 2: Face Auth, 3: Calculation, 4: Dispense
     const [scannedData, setScannedData] = useState(null);
     const [faceVerified, setFaceVerified] = useState(false);
@@ -203,6 +206,70 @@ const ScanDispense = () => {
         }
     };
 
+    const [showAddBeneficiary, setShowAddBeneficiary] = useState(false);
+
+    useEffect(() => {
+        if (location.state?.action === 'add_beneficiary') {
+            setShowAddBeneficiary(true);
+            // Clear state so it doesn't reopen on refresh? (Optional, requires navigation replace)
+            window.history.replaceState({}, document.title);
+        }
+    }, [location]);
+
+    const [showMyRequests, setShowMyRequests] = useState(false);
+    const [myRequests, setMyRequests] = useState([]);
+    const [newBeneficiary, setNewBeneficiary] = useState({
+        name: '',
+        card: '',
+        gender: 'Male',
+        members: 1,
+        familyMembers: [],
+        assignedShop: currentUser?.shopLocation || ''
+    });
+
+    const fetchMyRequests = async () => {
+        if (!currentUser) return;
+        try {
+            const res = await fetch(`${API_URL}/beneficiary-requests?email=${currentUser.email}`);
+            const data = await res.json();
+            setMyRequests(data);
+            setShowMyRequests(true);
+        } catch (err) { console.error("Failed to fetch requests"); }
+    };
+
+    const handleAddBeneficiarySubmit = async (e) => {
+        e.preventDefault();
+        if (!currentUser) return;
+
+        try {
+            const payload = {
+                submittedBy: currentUser.email,
+                data: {
+                    ...newBeneficiary,
+                    assignedShop: currentUser.shopLocation || 'Main Office'
+                }
+            };
+
+            const res = await fetch(`${API_URL}/beneficiary-requests`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+
+            const data = await res.json();
+            if (res.ok) {
+                alert("Request Submitted Successfully!");
+                setShowAddBeneficiary(false);
+                setNewBeneficiary({ name: '', card: '', gender: 'Male', members: 1, familyMembers: [], assignedShop: '' });
+            } else {
+                alert(`Error: ${data.error}`);
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Submission failed");
+        }
+    };
+
     return (
         <div className="min-h-screen bg-slate-50 p-6 flex flex-col items-center">
             <div className="w-full max-w-5xl flex justify-between items-center mb-6">
@@ -211,11 +278,14 @@ const ScanDispense = () => {
                 </h1>
 
                 <div className="flex gap-2">
+                    <button onClick={() => setShowAddBeneficiary(true)} className="flex items-center gap-2 bg-indigo-600 text-white px-4 py-2 rounded-lg shadow-sm font-medium hover:bg-indigo-700 transition-colors">
+                        <User size={18} /> Add New Beneficiary
+                    </button>
                     <button onClick={handleRequestDeactivation} className="flex items-center gap-2 bg-red-50 px-4 py-2 rounded-lg shadow-sm font-medium text-red-600 hover:bg-red-100 hover:text-red-700 transition-colors">
                         <UserX size={18} /> Request Deactivation
                     </button>
-                    <button onClick={fetchMyReports} className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg shadow-sm font-medium text-slate-700 hover:text-indigo-600">
-                        <FileText size={18} /> My Reports
+                    <button onClick={() => { fetchMyReports(); fetchMyRequests(); }} className="flex items-center gap-2 bg-white px-4 py-2 rounded-lg shadow-sm font-medium text-slate-700 hover:text-indigo-600">
+                        <FileText size={18} /> Reports & Requests
                     </button>
                 </div>
             </div>
@@ -368,14 +438,17 @@ const ScanDispense = () => {
             </div>
 
 
-            {/* MY REPORTS MODAL */}
+            {/* MY REPORTS MODAL (Now includes Requests) */}
             {
                 showReports && (
                     <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
                         <div className="bg-white rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
                             <div className="flex justify-between items-center mb-6">
                                 <h3 className="text-xl font-bold">My Dispense History</h3>
-                                <button onClick={() => setShowReports(false)}><XCircle size={24} /></button>
+                                <div className="flex gap-2">
+                                    <button onClick={() => { setShowReports(false); setShowMyRequests(true); }} className="text-indigo-600 text-sm font-medium">View My Requests</button>
+                                    <button onClick={() => setShowReports(false)}><XCircle size={24} /></button>
+                                </div>
                             </div>
                             <table className="w-full text-left bg-slate-50 rounded-lg overflow-hidden">
                                 <thead className="bg-slate-100 text-slate-500 border-b border-slate-200">
@@ -400,6 +473,91 @@ const ScanDispense = () => {
                     </div>
                 )
             }
+
+            {/* MY REQUESTS MODAL */}
+            {
+                showMyRequests && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                        <div className="bg-white rounded-2xl p-6 w-full max-w-2xl max-h-[80vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-xl font-bold">My Beneficiary Requests</h3>
+                                <button onClick={() => setShowMyRequests(false)}><XCircle size={24} /></button>
+                            </div>
+                            <div className="space-y-4">
+                                {myRequests.map(req => (
+                                    <div key={req._id} className="p-4 bg-slate-50 border rounded-lg">
+                                        <div className="flex justify-between items-start">
+                                            <div>
+                                                <h4 className="font-bold">{req.data?.name}</h4>
+                                                <p className="text-sm text-slate-500">Card: {req.data?.card}</p>
+                                                <p className="text-xs text-slate-400">Submitted: {new Date(req.submissionDate).toLocaleDateString()}</p>
+                                            </div>
+                                            <div className={`px-3 py-1 rounded-full text-sm font-medium
+                                                ${req.status === 'Approved' ? 'bg-green-100 text-green-700' :
+                                                    req.status === 'Rejected' ? 'bg-red-100 text-red-700' :
+                                                        req.status === 'ChangesRequested' ? 'bg-orange-100 text-orange-700' : 'bg-blue-100 text-blue-700'}`}>
+                                                {req.status}
+                                            </div>
+                                        </div>
+                                        {req.adminComments && (
+                                            <div className="mt-2 text-sm bg-yellow-50 p-2 rounded text-yellow-800 border-l-2 border-yellow-400">
+                                                <strong>Admin Note:</strong> {req.adminComments}
+                                            </div>
+                                        )}
+                                    </div>
+                                ))}
+                                {myRequests.length === 0 && <p className="text-center text-slate-400">No requests found</p>}
+                            </div>
+                        </div>
+                    </div>
+                )
+            }
+
+            {/* ADD BENEFICIARY MODAL */}
+            {
+                showAddBeneficiary && (
+                    <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                        <div className="bg-white rounded-2xl p-6 w-full max-w-lg max-h-[90vh] overflow-y-auto">
+                            <div className="flex justify-between items-center mb-6">
+                                <h3 className="text-xl font-bold">Add Beneficiary Request</h3>
+                                <button onClick={() => setShowAddBeneficiary(false)}><XCircle size={24} /></button>
+                            </div>
+                            <form onSubmit={handleAddBeneficiarySubmit} className="space-y-4">
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Name (Head of Family)</label>
+                                    <input required type="text" className="w-full p-2 border rounded-lg"
+                                        value={newBeneficiary.name} onChange={e => setNewBeneficiary({ ...newBeneficiary, name: e.target.value })} />
+                                </div>
+                                <div className="grid grid-cols-2 gap-4">
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Ration Card ID</label>
+                                        <input required type="text" className="w-full p-2 border rounded-lg"
+                                            value={newBeneficiary.card} onChange={e => setNewBeneficiary({ ...newBeneficiary, card: e.target.value })} />
+                                    </div>
+                                    <div>
+                                        <label className="block text-sm font-medium text-slate-700 mb-1">Gender</label>
+                                        <select className="w-full p-2 border rounded-lg" value={newBeneficiary.gender} onChange={e => setNewBeneficiary({ ...newBeneficiary, gender: e.target.value })}>
+                                            <option>Male</option>
+                                            <option>Female</option>
+                                            <option>Other</option>
+                                        </select>
+                                    </div>
+                                </div>
+                                <div>
+                                    <label className="block text-sm font-medium text-slate-700 mb-1">Total Members</label>
+                                    <input required type="number" min="1" className="w-full p-2 border rounded-lg"
+                                        value={newBeneficiary.members} onChange={e => setNewBeneficiary({ ...newBeneficiary, members: parseInt(e.target.value) })} />
+                                </div>
+
+                                <button type="submit" className="w-full py-3 bg-indigo-600 text-white rounded-lg font-bold hover:bg-indigo-700 mt-4">
+                                    Submit Request
+                                </button>
+                            </form>
+                        </div>
+                    </div>
+                )
+            }
+
         </div >
     );
 };

@@ -44,6 +44,26 @@ const BeneficiarySchema = new mongoose.Schema({
     }]
 });
 
+const BeneficiaryRequestSchema = new mongoose.Schema({
+    submissionDate: { type: Date, default: Date.now },
+    submittedBy: String, // Employee Email
+    status: { type: String, default: 'Pending', enum: ['Pending', 'Approved', 'Rejected', 'ChangesRequested'] },
+    adminComments: String,
+    data: {
+        name: String,
+        gender: String,
+        card: { type: String, unique: true }, // Ensure uniqueness check happens
+        members: Number,
+        familyMembers: [{
+            name: String,
+            age: Number,
+            gender: String,
+            relation: String
+        }],
+        assignedShop: String
+    }
+});
+
 const EmployeeSchema = new mongoose.Schema({
     name: String,
     email: { type: String, unique: true },
@@ -61,11 +81,22 @@ const InventorySchema = new mongoose.Schema({
 });
 
 const TransactionSchema = new mongoose.Schema({
+    txnId: { type: String, unique: true }, // MATCH JSON: txnId
     beneficiaryId: { type: mongoose.Schema.Types.ObjectId, ref: 'Beneficiary' },
     beneficiaryName: String,
     cardId: String,
     employeeEmail: String,
-    items: Object, // { rice: 5, sugar: 5, special: ... }
+    items: [ // MATCH JSON: detailed items array
+        {
+            item: String,
+            qty: Number,
+            unit: String,
+            price: Number
+        }
+    ],
+    totalAmount: Number, // MATCH JSON: totalAmount
+    authMode: String, // MATCH JSON: authMode (Biometric/OTP)
+    status: { type: String, default: 'SUCCESS' },
     date: { type: Date, default: Date.now },
     location: String
 });
@@ -81,6 +112,7 @@ const ShopSchema = new mongoose.Schema({
 });
 
 const Beneficiary = mongoose.model('Beneficiary', BeneficiarySchema);
+const BeneficiaryRequest = mongoose.model('BeneficiaryRequest', BeneficiaryRequestSchema);
 const Employee = mongoose.model('Employee', EmployeeSchema);
 const Inventory = mongoose.model('Inventory', InventorySchema);
 const Transaction = mongoose.model('Transaction', TransactionSchema);
@@ -103,7 +135,15 @@ app.post('/api/auth/login', async (req, res) => {
 
         const isMatch = await bcrypt.compare(password, user.password);
         if (isMatch) {
-            res.json({ success: true, user: { name: user.name, role: user.role } });
+            res.json({
+                success: true,
+                user: {
+                    name: user.name,
+                    role: user.role,
+                    email: user.email,
+                    shopLocation: user.shopLocation
+                }
+            });
         } else {
             res.status(401).json({ success: false, message: "Invalid credentials" });
         }
@@ -134,12 +174,17 @@ app.get('/api/shops', async (req, res) => {
 
 app.post('/api/employees', async (req, res) => {
     try {
-        // Generate default password: username + pds@123
+        // Use provided password or generate default: username + pds@123
         const emailLower = req.body.email.toLowerCase();
-        const emailPrefix = emailLower.split('@')[0];
-        const defaultPassword = `${emailPrefix}pds@123`;
+        let plainPassword = req.body.password;
+
+        if (!plainPassword) {
+            const emailPrefix = emailLower.split('@')[0];
+            plainPassword = `${emailPrefix}pds@123`;
+        }
+
         const salt = await bcrypt.genSalt(10);
-        const hashedPassword = await bcrypt.hash(defaultPassword, salt);
+        const hashedPassword = await bcrypt.hash(plainPassword, salt);
 
         const newEmp = await Employee.create({
             name: req.body.name,
@@ -169,6 +214,17 @@ app.put('/api/employees/:id/status', async (req, res) => {
     try {
         const { status } = req.body;
         const updated = await Employee.findByIdAndUpdate(req.params.id, { status }, { new: true });
+        res.json(updated);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// Update Employee Details (Generic - e.g. shopLocation)
+app.put('/api/employees/:id', async (req, res) => {
+    try {
+        const updates = req.body;
+        const updated = await Employee.findByIdAndUpdate(req.params.id, updates, { new: true });
         res.json(updated);
     } catch (err) {
         res.status(500).json({ error: err.message });
@@ -245,6 +301,87 @@ app.delete('/api/beneficiaries/:id', async (req, res) => {
     }
 });
 
+// --- BENEFICIARY REQUESTS (Employee -> Admin) ---
+
+// 1. Submit a new Request (Employee)
+app.post('/api/beneficiary-requests', async (req, res) => {
+    try {
+        const { submittedBy, data } = req.body;
+
+        // Basic Check: Does card already exist in active DB?
+        const exists = await Beneficiary.findOne({ card: data.card });
+        if (exists) return res.status(400).json({ error: "Card ID already exists in Active Database" });
+
+        // Basic Check: Does request already exist? (Optional, based on Card ID)
+        const pending = await BeneficiaryRequest.findOne({ 'data.card': data.card, status: 'Pending' });
+        if (pending) return res.status(400).json({ error: "A pending request for this Card ID already exists" });
+
+        const request = await BeneficiaryRequest.create({
+            submittedBy,
+            data,
+            status: 'Pending'
+        });
+        res.json(request);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 2. Get Requests (Admin: All / Filter by Status; Employee: My Requests)
+app.get('/api/beneficiary-requests', async (req, res) => {
+    try {
+        const { email, status } = req.query;
+        let query = {};
+        if (email) query.submittedBy = { $regex: new RegExp(`^${email.trim()}$`, 'i') };
+        if (status) query.status = status;
+
+        const requests = await BeneficiaryRequest.find(query).sort({ submissionDate: -1 });
+        res.json(requests);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
+// 3. Admin Action (Approve / Deny / Review)
+app.put('/api/beneficiary-requests/:id/status', async (req, res) => {
+    try {
+        const { status, adminComments } = req.body; // status: 'Approved', 'Rejected', 'ChangesRequested'
+        const requestId = req.params.id;
+
+        const request = await BeneficiaryRequest.findById(requestId);
+        if (!request) return res.status(404).json({ error: "Request not found" });
+
+        if (status === 'Approved') {
+            // Create the Real Beneficiary
+            const benefData = request.data;
+
+            // Double check existence to be safe
+            const exists = await Beneficiary.findOne({ card: benefData.card });
+            if (exists) return res.status(400).json({ error: "Cannot Approve: Card ID already exists in Active Database" });
+
+            await Beneficiary.create({
+                ...benefData,
+                status: 'Active',
+                assignedEmployee: request.submittedBy // Or keep null/logic
+            });
+
+            request.status = 'Approved';
+            request.adminComments = adminComments || "Approved by Admin";
+        } else if (status === 'Rejected') {
+            request.status = 'Rejected';
+            request.adminComments = adminComments;
+        } else if (status === 'ChangesRequested') {
+            request.status = 'ChangesRequested';
+            request.adminComments = adminComments;
+        }
+
+        await request.save();
+        res.json(request);
+    } catch (err) {
+        res.status(500).json({ error: err.message });
+    }
+});
+
 // Reset Monthly Ration (Manager Only)
 app.post('/api/ration/reset', async (req, res) => {
     try {
@@ -309,13 +446,25 @@ app.post('/api/dispense', async (req, res) => {
         }
 
         // 3. Log Transaction
+        // Lookup Employee to get Shop Location
+        const employee = await Employee.findOne({ email: req.body.employeeEmail?.toLowerCase() });
+        const transactionLocation = employee ? employee.shopLocation : (user.assignedShop || "Unknown Area");
+
         await Transaction.create({
+            txnId: `TXN-${Date.now()}`, // Simple ID generation
             beneficiaryId: user._id,
             beneficiaryName: user.name,
             cardId: user.card,
             employeeEmail: req.body.employeeEmail || "Unknown",
-            items: { rice: 5, sugar: 5, special: specialRation || null },
-            location: user.address || "Unknown Area"
+            items: [
+                { item: 'Rice', qty: 5, unit: 'kg', price: 0 },
+                { item: 'Wheat', qty: 5, unit: 'kg', price: 0 },
+                ...(specialRation ? [{ item: specialRation, qty: 1, unit: 'pkg', price: 0 }] : [])
+            ],
+            totalAmount: 0, // Free rations for now
+            authMode: 'Biometric', // Default for now
+            status: 'SUCCESS',
+            location: transactionLocation
         });
 
         res.json({ success: true });
@@ -327,13 +476,30 @@ app.post('/api/dispense', async (req, res) => {
 // --- REPORTS ---
 app.get('/api/reports', async (req, res) => {
     try {
-        const { employee } = req.query;
+        console.log('API /reports called with query:', req.query); // DEBUG LOG
+        const { employee, shop, sort, authMode, item } = req.query;
         let query = {};
         if (employee) {
-            query.employeeEmail = employee;
+            query.employeeEmail = { $regex: new RegExp(`^${employee.trim()}$`, 'i') };
         }
-        // distinct reports sort by date desc
-        const reports = await Transaction.find(query).sort({ date: -1 });
+        if (shop) {
+            query.location = { $regex: new RegExp(`^${shop.trim()}$`, 'i') };
+        }
+        if (authMode) {
+            query.authMode = authMode;
+        }
+        if (item) {
+            // Search inside the items array for a matching item name
+            query['items.item'] = item;
+        }
+
+        // Sorting Logic
+        let sortOption = { date: -1 }; // Default: Newest First
+        if (sort === 'date_asc') sortOption = { date: 1 };
+        if (sort === 'amount_desc') sortOption = { totalAmount: -1 };
+        if (sort === 'amount_asc') sortOption = { totalAmount: 1 };
+
+        const reports = await Transaction.find(query).sort(sortOption);
         res.json(reports);
     } catch (err) {
         res.status(500).json({ error: err.message });

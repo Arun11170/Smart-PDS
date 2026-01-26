@@ -1,36 +1,30 @@
-const API_URL = 'http://localhost:5000/api';
+const http = require('http');
 
-const checkData = async () => {
-    try {
-        console.log('Fetching Shops...');
-        const shopsRes = await fetch(`${API_URL}/shops`);
-        const shops = await shopsRes.json();
-        console.log(`✅ Shops Count: ${shops.length}`);
-        if (shops.length > 0) {
-            console.log('Sample Shop:', JSON.stringify(shops[0], null, 2));
-        }
+const url = 'http://localhost:5000/api/reports';
 
-        console.log('\nFetching Beneficiaries...');
-        const benRes = await fetch(`${API_URL}/beneficiaries`);
-        const beneficiaries = await benRes.json();
-        console.log(`✅ Beneficiaries Count: ${beneficiaries.length}`);
+console.log(`Testing API: ${url}`);
 
-        if (beneficiaries.length > 0) {
-            // Find one with an assigned shop
-            const ben = beneficiaries.find(b => b.assignedShop);
+http.get(url, (res) => {
+    let data = '';
+    console.log(`Status Code: ${res.statusCode}`);
 
-            if (ben) {
-                console.log('Sample Beneficiary with Shop:', JSON.stringify(ben, null, 2));
-                const match = shops.find(s => s.name.toLowerCase().trim() === ben.assignedShop.toLowerCase().trim());
-                console.log(`\nTEST MATCH: '${ben.assignedShop}' -> Found in Shops? ${match ? 'YES' : 'NO'}`);
-            } else {
-                console.log('⚠️ No beneficiaries found with assignedShop property.');
+    res.on('data', (chunk) => {
+        data += chunk;
+    });
+
+    res.on('end', () => {
+        try {
+            const json = JSON.parse(data);
+            console.log(`Total Records: ${json.length}`);
+            if (json.length > 0) {
+                console.log('Sample Record Item Type:', typeof json[0].items);
+                console.log('Sample Record Items:', JSON.stringify(json[0].items, null, 2));
             }
+        } catch (e) {
+            console.log('Response (Not JSON):', data);
         }
+    });
 
-    } catch (err) {
-        console.error('❌ API Verification Failed:', err.message);
-    }
-};
-
-checkData();
+}).on("error", (err) => {
+    console.log("Error: " + err.message);
+});

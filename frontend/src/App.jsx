@@ -4,6 +4,7 @@ import Login from './pages/Login';
 import Home from './pages/Home';
 import ScanDispense from './pages/ScanDispense';
 import AdminDashboard from './pages/AdminDashboard';
+import AddBeneficiary from './pages/AddBeneficiary'; // New Page
 import Payment from './pages/Payment';
 import VoiceChatbot from './components/VoiceChatbot';
 
@@ -37,6 +38,11 @@ function App() {
           <Route path="/payment" element={
             <ProtectedRoute>
               <Payment />
+            </ProtectedRoute>
+          } />
+          <Route path="/add-beneficiary" element={
+            <ProtectedRoute>
+              <AddBeneficiary />
             </ProtectedRoute>
           } />
           <Route path="/admin" element={

@@ -6,56 +6,83 @@ import ScanDispense from './pages/ScanDispense';
 import AdminDashboard from './pages/AdminDashboard';
 import AddBeneficiary from './pages/AddBeneficiary'; // New Page
 import Payment from './pages/Payment';
-import VoiceChatbot from './components/VoiceChatbot';
 
-// Placeholder for Protected Route logic
+
+import VoiceAssistant from './components/VoiceAssistant';
+import { VoiceCommandProvider } from './context/VoiceCommandContext';
+
+// Protected Route Logic
 const ProtectedRoute = ({ children, isAdmin }) => {
-  // TODO: Implement actual auth check
-  const isAuthenticated = true; // Mock
-  const userRole = isAdmin ? 'admin' : 'user'; // Mock, assume admin for dev
+  const userStr = localStorage.getItem('user');
+  const user = userStr ? JSON.parse(userStr) : null;
 
-  if (!isAuthenticated) return <Navigate to="/" />;
-  if (isAdmin && userRole !== 'admin') return <Navigate to="/home" />;
+  if (!user) {
+    return <Navigate to="/" replace />;
+  }
+
+  // STRICT SEPARATION LOGIC
+
+  // 1. If trying to access Admin Route...
+  if (isAdmin) {
+    if (user.role !== 'manager') {
+      // Employee trying to access Admin -> Go to Home
+      return <Navigate to="/home" replace />;
+    }
+  }
+  // 2. If trying to access Employee Route (Home, Scan, etc.)...
+  else {
+    if (user.role === 'manager') {
+      // Manager trying to access Employee pages -> Go to Admin
+      return <Navigate to="/admin" replace />;
+    }
+  }
+
   return children;
 };
 
+
+
 function App() {
   return (
-    <Router>
-      <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
-        <Routes>
-          <Route path="/" element={<Login />} />
-          <Route path="/home" element={
-            <ProtectedRoute>
-              <Home />
-            </ProtectedRoute>
-          } />
-          <Route path="/scan" element={
-            <ProtectedRoute>
-              <ScanDispense />
-            </ProtectedRoute>
-          } />
-          <Route path="/payment" element={
-            <ProtectedRoute>
-              <Payment />
-            </ProtectedRoute>
-          } />
-          <Route path="/add-beneficiary" element={
-            <ProtectedRoute>
-              <AddBeneficiary />
-            </ProtectedRoute>
-          } />
-          <Route path="/admin" element={
-            <ProtectedRoute isAdmin={true}>
-              <AdminDashboard />
-            </ProtectedRoute>
-          } />
-        </Routes>
-
-        {/* Global Chatbot Widget */}
-        {/* <VoiceChatbot /> */}
-      </div>
-    </Router>
+    <VoiceCommandProvider>
+      <Router>
+        <div className="min-h-screen bg-slate-50 text-slate-900 font-sans">
+          <Routes>
+            <Route path="/" element={<Login />} />
+            <Route path="/home" element={
+              <ProtectedRoute>
+                <Home />
+                <VoiceAssistant />
+              </ProtectedRoute>
+            } />
+            <Route path="/scan" element={
+              <ProtectedRoute>
+                <ScanDispense />
+                <VoiceAssistant />
+              </ProtectedRoute>
+            } />
+            <Route path="/payment" element={
+              <ProtectedRoute>
+                <Payment />
+                <VoiceAssistant />
+              </ProtectedRoute>
+            } />
+            <Route path="/add-beneficiary" element={
+              <ProtectedRoute>
+                <AddBeneficiary />
+                <VoiceAssistant />
+              </ProtectedRoute>
+            } />
+            <Route path="/admin" element={
+              <ProtectedRoute isAdmin={true}>
+                <AdminDashboard />
+                <VoiceAssistant />
+              </ProtectedRoute>
+            } />
+          </Routes>
+        </div>
+      </Router>
+    </VoiceCommandProvider>
   );
 }
 
